@@ -41,7 +41,7 @@ def _extract_vector(cell):
         return None
 
 
-def _build_combined_embeddings(df, body_col='embedded_review_body', title_col='embedded_review_title'):
+def _build_combined_embeddings(df, first_col='embedded_review_body', title_col='embedded_review_title'):
     """Return concatenated per-row vectors (N x D) built from available embedding columns.
 
     If both body and title exist, result is [body | title]. If only one exists, result is that column.
@@ -49,11 +49,11 @@ def _build_combined_embeddings(df, body_col='embedded_review_body', title_col='e
     cols = []
     vecs = []
 
-    if body_col in df.columns:
-        body_vecs = [_extract_vector(x) for x in df[body_col]]
-        cols.append(('body', body_vecs))
+    if first_col in df.columns:
+        first_vecs = [_extract_vector(x) for x in df[first_col]]
+        cols.append(('first', first_vecs))
     else:
-        body_vecs = None
+        first_vecs = None
 
     if title_col in df.columns:
         title_vecs = [_extract_vector(x) for x in df[title_col]]
@@ -62,7 +62,7 @@ def _build_combined_embeddings(df, body_col='embedded_review_body', title_col='e
         title_vecs = None
 
     if not cols:
-        raise ValueError(f"No embedding columns found. Expected one of: {body_col}, {title_col}")
+        raise ValueError(f"No embedding columns found. Expected one of: {first_col}, {title_col}")
 
     # determine vector dim from first non-empty vector across available cols
     first_non_empty = None
@@ -111,18 +111,35 @@ def apply_pca_single_component(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def apply_pca_multiple_components(df: pd.DataFrame, n_components: int = 2) -> pd.DataFrame:
+def apply_pca_multiple_components(df: pd.DataFrame, n_components: int = 2, embedded_text_col: list = ['embedded_text', 'embedded_text']) -> pd.DataFrame:
     """Compute PCA(n_components) and attach `pca_0`, `pca_1`, ... columns to `df`.
 
     Returns the dataframe with added PCA component columns.
     """
     if n_components < 1:
         raise ValueError('n_components must be >= 1')
-
-    X = _build_combined_embeddings(df)
+    
+    X = _build_combined_embeddings(df, embedded_text_col[0], embedded_text_col[1])
     pca = PCA(n_components=n_components, random_state=42)
     comps = pca.fit_transform(X)
     out = df.copy()
     for i in range(comps.shape[1]):
         out[f'pca_{i}'] = comps[:, i]
     return out
+
+if __name__ == "__main__":
+    from datasets import load_dataset
+    df = load_dataset("yelp_review_full")['train'].to_pandas()
+    print(df.shape)
+    print(df.head())
+    print(df.columns)
+    df = df.sample(1000, random_state=42).reset_index(drop=True)
+
+    from features.word_embeddings import word2vec
+
+    df_embedded = word2vec(df, text_columns=['text', 'text'])
+    print("Embeddings added.")
+
+    df_pca = apply_pca_multiple_components(df_embedded, n_components=2)
+    print("PCA applied.")
+    print(df_pca[['pca_0', 'pca_1']].head())
